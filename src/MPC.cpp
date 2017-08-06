@@ -6,8 +6,8 @@
 using CppAD::AD;
 
 // TODO: Set the timestep length and duration
-size_t N = 25;
-double dt = 0.05;
+size_t N = 10;
+double dt = 0.1;
 
 // This value assumes the model presented in the classroom is used.
 //
@@ -58,15 +58,19 @@ public:
         // any anything you think may be beneficial.
         // The part of the cost based on the reference state.
         for (int t = 0; t < N; t++) {
-            fg[0] += CppAD::pow(vars[cte_start + t], 2);
-            fg[0] += CppAD::pow(vars[epsi_start + t], 2);
+            // scaled penalty for errors
+            fg[0] += 1000*CppAD::pow(vars[cte_start + t], 2);
+            fg[0] += 1000*CppAD::pow(vars[epsi_start + t], 2);
             fg[0] += CppAD::pow(vars[v_start + t] - ref_v, 2);
         }
 
         // Minimize the use of actuators.
         for (int t = 0; t < N - 1; t++) {
-            fg[0] += CppAD::pow(vars[delta_start + t], 2);
-            fg[0] += CppAD::pow(vars[a_start + t], 2);
+            // scaled penalty for start/stop/braking
+            fg[0] += 10*CppAD::pow(vars[delta_start + t], 2);
+            fg[0] += 10*CppAD::pow(vars[a_start + t], 2);
+            // scaled penalty for speed + steer
+            fg[0] += 500*CppAD::pow(vars[delta_start + t] * vars[v_start+t], 2);
         }
 
         // Minimize the value gap between sequential actuations.
