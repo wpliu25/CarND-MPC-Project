@@ -8,6 +8,7 @@
 #include "Eigen-3.3/Eigen/QR"
 #include "MPC.h"
 #include "json.hpp"
+#include <cppad/cppad.hpp>
 
 // for convenience
 using json = nlohmann::json;
@@ -101,16 +102,24 @@ int main() {
                     double steer_value;
                     double throttle_value;
 
+                    // Account for delay/latency
+                    double dt = 0.1;
+                    double Lf = 2.67;
+                    double px_latency = (px + v * CppAD::cos(psi) * dt);
+                    double py_latency = (py + v * CppAD::sin(psi) * dt);
+                    double psi_latency = (psi + v/Lf * mpc.delta_ / Lf * dt);
+                    double v_latency = (v + mpc.a_ * dt);
+
                     // Coordinate system
                     vector<double> ptsx_local;
                     vector<double> ptsy_local;
                     for(int i = 0; i< (int) ptsx.size(); i++)
                     {
-                        double dx, dy;
-                        dx = ptsx[i] - px;
-                        dy = ptsy[i] - py;
-                        ptsx_local.push_back(dx*cos(-psi)-dy*sin(-psi));
-                        ptsy_local.push_back(dx*sin(-psi)+dy*cos(-psi));
+                        // Shift car reference angle to 90 degrees
+                        double shift_x = ptsx[i] - px_latency;
+                        double shift_y = ptsy[i] - py_latency;
+                        ptsx_local.push_back(shift_x*cos(-psi_latency)-shift_y*sin(-psi_latency));
+                        ptsy_local.push_back(shift_x*sin(-psi_latency)+shift_y*cos(-psi_latency));
                     }
                     double* ptr_ptsx_local_eigen = &ptsx_local[0];
                     double* ptr_ptsy_local_eigen = &ptsy_local[0];
@@ -118,21 +127,18 @@ int main() {
                     Eigen::Map<Eigen::VectorXd> ptsy_eigen(ptr_ptsy_local_eigen, ptsy_local.size());
 
                     // polynomial
-                    auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 4);
+                    auto coeffs = polyfit(ptsx_eigen, ptsy_eigen, 3);
 
                     // NOTE: free feel to play around with these
-                    double local_x = 0;
-                    double local_y = 0;
-                    double local_psi = 0;
                     // The cross track error is calculated by evaluating at polynomial at x, f(x)
                     // and subtracting y.
-                    double cte = polyeval(coeffs, local_x) - local_y;
+                    double cte = polyeval(coeffs, 0);
                     // Due to the sign starting at 0, the orientation error is -f'(x).
                     // derivative of coeffs[0] + coeffs[1] * x -> coeffs[1]
-                    double epsi = local_psi - atan(coeffs[1]);
+                    double epsi = -atan(coeffs[1]);
 
                     Eigen::VectorXd state(6);
-                    state << local_x, local_y, local_psi, v, cte, epsi;
+                    state << 0, 0, 0, v_latency, cte, epsi;
                     auto vars = mpc.Solve(state, coeffs);
 
                     json msgJson;
@@ -140,7 +146,7 @@ int main() {
                     // Otherwise the values will be in between [-deg2rad(25), deg2rad(25] instead of [-1, 1].
                     steer_value = vars[0];
                     throttle_value = vars[1];
-                    msgJson["steering_angle"] = steer_value/(deg2rad(25));
+                    msgJson["steering_angle"] = -steer_value/(deg2rad(25)*Lf);
                     msgJson["throttle"] = throttle_value;
 
                     //Display the MPC predicted trajectory
